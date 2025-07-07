@@ -34,7 +34,7 @@ fi
 
 # Check Ubuntu version
 if ! grep -q "20.04" /etc/os-release; then
-    echo -e "${YELLOW}WARNING: This script tested on Ubuntu 20.04 only.${NC}"
+    echo -e "${YELLOW}WARNING: This script is designed for Ubuntu 20.04.${NC}"
     echo "Your system may not be compatible."
     read -p "Do you want to continue anyway? (y/N): " -n 1 -r
     echo
@@ -48,13 +48,14 @@ echo -e "${GREEN}Available options:${NC}"
 echo "1. Full installation (recommended)"
 echo "2. Install Chrome Remote Desktop only"
 echo "3. Configure audio only"
-echo "4. Fix package compatibility issues"
-echo "5. Validate existing installation"
-echo "6. Uninstall Chrome Remote Desktop"
-echo "7. Exit"
+echo "4. Fix audio startup issues"
+echo "5. Fix package compatibility issues"
+echo "6. Validate existing installation"
+echo "7. Uninstall Chrome Remote Desktop"
+echo "8. Exit"
 echo
 
-read -p "Select an option (1-7): " choice
+read -p "Select an option (1-8): " choice
 
 case $choice in
     1)
@@ -95,6 +96,15 @@ case $choice in
         fi
         ;;
     4)
+        echo -e "${GREEN}Fixing audio startup issues...${NC}"
+        if [ -f "$SCRIPT_DIR/fix_audio_startup.sh" ]; then
+            "$SCRIPT_DIR/fix_audio_startup.sh"
+        else
+            echo -e "${RED}ERROR: Audio startup fix script not found!${NC}"
+            exit 1
+        fi
+        ;;
+    5)
         echo -e "${GREEN}Fixing package compatibility issues...${NC}"
         if [ -f "$SCRIPT_DIR/fix_package_issues.sh" ]; then
             "$SCRIPT_DIR/fix_package_issues.sh"
@@ -103,7 +113,7 @@ case $choice in
             exit 1
         fi
         ;;
-    5)
+    6)
         echo -e "${GREEN}Validating installation...${NC}"
         if [ -f "$SCRIPT_DIR/validate_installation.sh" ]; then
             "$SCRIPT_DIR/validate_installation.sh"
@@ -112,7 +122,7 @@ case $choice in
             exit 1
         fi
         ;;
-    6)
+    7)
         echo -e "${YELLOW}Uninstalling Chrome Remote Desktop...${NC}"
         if [ -f "$SCRIPT_DIR/uninstall_chrome_remote_desktop.sh" ]; then
             "$SCRIPT_DIR/uninstall_chrome_remote_desktop.sh"
@@ -121,12 +131,12 @@ case $choice in
             exit 1
         fi
         ;;
-    7)
+    8)
         echo "Goodbye!"
         exit 0
         ;;
     *)
-        echo -e "${RED}Invalid option. Please select 1-7.${NC}"
+        echo -e "${RED}Invalid option. Please select 1-8.${NC}"
         exit 1
         ;;
 esac

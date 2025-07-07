@@ -129,7 +129,7 @@ rm -f ~/bin/fix-audio.sh
 # Remove desktop files
 rm -f ~/Desktop/chrome-remote-desktop-setup.desktop
 
-# Remove log
+# Remove documentation
 rm -f ~/chrome-remote-desktop-setup-info.txt
 
 # Remove user from groups

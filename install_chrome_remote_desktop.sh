@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Chrome Remote Desktop Installation and Configuration Script
-# For Ubuntu Minimal 20.04 with OpenBox
+# For Ubuntu Minimal 20.04 with OpenBox and Audio Support
 
 set -e  # Exit on any error
 
@@ -37,7 +37,7 @@ fi
 
 # Check Ubuntu version
 if ! grep -q "20.04" /etc/os-release; then
-    warn "This script tested on Ubuntu 20.04 only. Your system may not be compatible."
+    warn "This script is designed for Ubuntu 20.04. Your system may not be compatible."
     read -p "Do you want to continue anyway? (y/N): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -136,7 +136,7 @@ sudo dpkg -i "/tmp/$CHROME_RDP_DEB" || sudo apt-get install -f -y
 
 # Add current user to chrome-remote-desktop group
 log "Adding user to chrome-remote-desktop group..."
-sudo usermod -aG chrome-remote-desktop $USER
+sudo usermod -a -G chrome-remote-desktop $USER
 
 # Create OpenBox configuration directory
 log "Setting up OpenBox configuration..."
@@ -146,8 +146,18 @@ mkdir -p ~/.config/openbox
 cat > ~/.config/openbox/autostart << 'EOF'
 #!/bin/bash
 
-# Start PulseAudio
-pulseaudio --start --log-target=syslog &
+# OpenBox Autostart for Chrome Remote Desktop
+# Ensures all services start in the correct order
+
+# Wait for session to be ready
+sleep 2
+
+# Start PulseAudio if not already running (backup)
+if ! pulseaudio --check; then
+    echo "Starting PulseAudio from autostart..."
+    pulseaudio --start --log-target=syslog --exit-idle-time=-1 &
+    sleep 3
+fi
 
 # Start system tray
 tint2 &
@@ -160,8 +170,8 @@ fi
 # Start file manager daemon
 thunar --daemon &
 
-# Optional: Start a terminal
-# xterm &
+# Optional: Start a terminal for debugging (uncomment if needed)
+# xterm -geometry 80x24+10+10 -title "Debug Terminal" &
 EOF
 
 chmod +x ~/.config/openbox/autostart
@@ -258,13 +268,63 @@ mkdir -p ~/.config/chrome-remote-desktop
 cat > ~/.chrome-remote-desktop-session << 'EOF'
 #!/bin/bash
 
+# Chrome Remote Desktop Session with Reliable Audio
+# This script ensures audio works properly on every session start
+
 # Set up environment
 export DISPLAY=:20
 export CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES="1920x1080,1680x1050,1600x1200,1400x1050,1280x1024,1024x768"
 
-# Start PulseAudio for audio
+# Audio environment setup
 export PULSE_RUNTIME_PATH="/run/user/$(id -u)/pulse"
-pulseaudio --start --log-target=syslog
+export PULSE_SERVER="unix:${PULSE_RUNTIME_PATH}/native"
+
+# Function to start audio with retries
+start_audio() {
+    local max_attempts=5
+    local attempt=1
+    
+    echo "Starting audio system..."
+    
+    # Kill any existing PulseAudio processes
+    pulseaudio --kill 2>/dev/null || true
+    sleep 2
+    
+    while [ $attempt -le $max_attempts ]; do
+        echo "Audio start attempt $attempt/$max_attempts"
+        
+        # Start PulseAudio
+        pulseaudio --start --log-target=syslog --exit-idle-time=-1
+        sleep 3
+        
+        # Check if PulseAudio is running
+        if pulseaudio --check; then
+            echo "PulseAudio started successfully"
+            
+            # Set default sink and unmute
+            sleep 2
+            DEFAULT_SINK=$(pactl get-default-sink 2>/dev/null || pactl list short sinks | head -n1 | cut -f2)
+            if [ ! -z "$DEFAULT_SINK" ]; then
+                pactl set-default-sink "$DEFAULT_SINK" 2>/dev/null || true
+                pactl set-sink-mute "$DEFAULT_SINK" false 2>/dev/null || true
+                pactl set-sink-volume "$DEFAULT_SINK" 75% 2>/dev/null || true
+                echo "Audio configured: sink=$DEFAULT_SINK, volume=75%, unmuted"
+            fi
+            break
+        else
+            echo "PulseAudio failed to start, retrying..."
+            sleep 2
+            ((attempt++))
+        fi
+    done
+    
+    if [ $attempt -gt $max_attempts ]; then
+        echo "Warning: PulseAudio failed to start after $max_attempts attempts"
+    fi
+}
+
+# Start audio system
+start_audio
 
 # Start OpenBox window manager
 exec openbox-session
@@ -280,28 +340,85 @@ mkdir -p ~/.config/pulse
 cat > ~/.config/pulse/default.pa << 'EOF'
 #!/usr/bin/pulseaudio -nF
 
-# Load audio drivers
+# PulseAudio Configuration for Chrome Remote Desktop
+# Optimized for reliable remote audio streaming
+
+# Load the default system configuration first
 .include /etc/pulse/default.pa
 
-# Load module for Chrome Remote Desktop audio streaming
+# Unload module-suspend-on-idle to prevent audio from suspending
+.ifexists module-suspend-on-idle.so
+unload-module module-suspend-on-idle
+.endif
+
+# Load network modules for Chrome Remote Desktop
 load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-socket
 
-# Enable audio over network (for remote desktop)
-load-module module-esound-protocol-tcp auth-ip-acl=127.0.0.1
+# Enable TCP protocol for remote desktop audio
+load-module module-esound-protocol-tcp auth-ip-acl=127.0.0.1 port=16001
+
+# Load additional modules for better remote desktop support
+load-module module-remap-sink sink_name=crd_sink master=@DEFAULT_SINK@ channels=2
+
+# Set default sample format and rate for better compatibility
+set-default-sink @DEFAULT_SINK@
+set-sink-volume @DEFAULT_SINK@ 75%
+set-sink-mute @DEFAULT_SINK@ false
 EOF
 
-# Create systemd user service for PulseAudio (optional)
+# Create PulseAudio daemon configuration
+cat > ~/.config/pulse/daemon.conf << 'EOF'
+# PulseAudio Daemon Configuration for Chrome Remote Desktop
+
+# Basic settings
+daemonize = no
+fail = yes
+allow-module-loading = yes
+allow-exit = no
+use-pid-file = yes
+system-instance = no
+
+# Audio quality settings
+default-sample-format = s16le
+default-sample-rate = 44100
+default-sample-channels = 2
+default-channel-map = front-left,front-right
+
+# Buffer settings for remote desktop
+default-fragments = 4
+default-fragment-size-msec = 25
+
+# Scheduling
+high-priority = yes
+nice-level = -11
+realtime-scheduling = yes
+realtime-priority = 5
+
+# Disable idle exit
+exit-idle-time = -1
+
+# Logging
+log-target = syslog
+log-level = info
+EOF
+
+# Create systemd user service for PulseAudio
 mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/pulseaudio.service << 'EOF'
+cat > ~/.config/systemd/user/pulseaudio-crd.service << 'EOF'
 [Unit]
-Description=PulseAudio Sound System
+Description=PulseAudio for Chrome Remote Desktop
 After=graphical-session.target
+Wants=graphical-session.target
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/pulseaudio --daemonize=no --log-target=journal
-Restart=on-failure
+ExecStartPre=/bin/bash -c 'pulseaudio --kill || true'
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/bin/pulseaudio --daemonize=no --log-target=journal --exit-idle-time=-1
+ExecStop=/usr/bin/pulseaudio --kill
+Restart=always
 RestartSec=5
+Environment=PULSE_RUNTIME_PATH=%t/pulse
 
 [Install]
 WantedBy=default.target
@@ -309,7 +426,9 @@ EOF
 
 # Enable PulseAudio user service
 systemctl --user daemon-reload
-systemctl --user enable pulseaudio.service
+systemctl --user enable pulseaudio-crd.service
+systemctl --user stop pulseaudio.service 2>/dev/null || true
+systemctl --user disable pulseaudio.service 2>/dev/null || true
 
 # Create a desktop entry for easy access
 log "Creating desktop shortcuts..."
@@ -408,9 +527,128 @@ ps aux | grep chrome-remote-desktop | grep -v grep
 
 echo -e "\nPulseAudio status:"
 pulseaudio --check && echo "PulseAudio is running" || echo "PulseAudio is not running"
+
+echo -e "\nSystemd audio service:"
+systemctl --user is-active pulseaudio-crd.service >/dev/null 2>&1 && echo "pulseaudio-crd.service is active" || echo "pulseaudio-crd.service is not active"
 EOF
 
-chmod +x ~/bin/restart-crd.sh ~/bin/check-crd.sh
+# Enhanced fix-audio script
+cat > ~/bin/fix-audio.sh << 'EOF'
+#!/bin/bash
+
+echo "=== Chrome Remote Desktop Audio Fix ==="
+echo
+
+# Stop systemd PulseAudio service
+echo "1. Stopping systemd PulseAudio services..."
+systemctl --user stop pulseaudio-crd.service 2>/dev/null || true
+systemctl --user stop pulseaudio.service 2>/dev/null || true
+
+# Kill all PulseAudio processes
+echo "2. Killing PulseAudio processes..."
+pulseaudio --kill 2>/dev/null || true
+killall pulseaudio 2>/dev/null || true
+sleep 3
+
+# Clean up runtime files
+echo "3. Cleaning up runtime files..."
+rm -rf /tmp/pulse-* 2>/dev/null || true
+rm -rf "/run/user/$(id -u)/pulse" 2>/dev/null || true
+
+# Start PulseAudio
+echo "4. Starting PulseAudio..."
+pulseaudio --start --log-target=syslog --exit-idle-time=-1
+
+# Start systemd service
+echo "5. Starting systemd service..."
+systemctl --user start pulseaudio-crd.service
+
+# Test audio
+echo "6. Testing audio..."
+sleep 2
+if pulseaudio --check; then
+    echo "   ✓ PulseAudio is running"
+    DEFAULT_SINK=$(pactl get-default-sink 2>/dev/null)
+    echo "   ✓ Default sink: $DEFAULT_SINK"
+    pactl set-sink-volume @DEFAULT_SINK@ 75%
+    pactl set-sink-mute @DEFAULT_SINK@ false
+    echo "   ✓ Audio configured"
+else
+    echo "   ✗ PulseAudio failed to start"
+fi
+
+echo
+echo "=== Fix Complete ==="
+echo "Audio should now be working. Disconnect and reconnect your remote session if needed."
+EOF
+
+# Enhanced test-audio script
+cat > ~/bin/test-audio.sh << 'EOF'
+#!/bin/bash
+
+echo "=== Chrome Remote Desktop Audio Test ==="
+echo
+
+# Check PulseAudio status
+echo "1. PulseAudio Status:"
+if pulseaudio --check; then
+    echo "   ✓ PulseAudio is running"
+    echo "   Process: $(pgrep -f pulseaudio | head -1)"
+else
+    echo "   ✗ PulseAudio is not running"
+fi
+echo
+
+# Check systemd service
+echo "2. Systemd Service Status:"
+if systemctl --user is-active pulseaudio-crd.service >/dev/null 2>&1; then
+    echo "   ✓ pulseaudio-crd.service is active"
+else
+    echo "   ✗ pulseaudio-crd.service is not active"
+fi
+echo
+
+# List audio devices
+echo "3. Available Audio Devices:"
+pactl list short sinks 2>/dev/null | while read line; do
+    echo "   - $line"
+done || echo "   No audio devices found"
+echo
+
+# Show default device
+echo "4. Default Audio Device:"
+DEFAULT_SINK=$(pactl get-default-sink 2>/dev/null || echo "None")
+echo "   $DEFAULT_SINK"
+echo
+
+# Test volume levels
+echo "5. Volume Levels:"
+if [ "$DEFAULT_SINK" != "None" ]; then
+    VOLUME=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -o '[0-9]*%' | head -1)
+    MUTE=$(pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null)
+    echo "   Volume: $VOLUME"
+    echo "   Mute: $MUTE"
+else
+    echo "   No default sink available"
+fi
+echo
+
+# Test audio output
+echo "6. Audio Test:"
+echo "   Playing test tone for 2 seconds..."
+if command -v speaker-test >/dev/null 2>&1; then
+    timeout 2 speaker-test -t sine -f 1000 -l 1 -s 1 >/dev/null 2>&1 || true
+    echo "   Test tone played (if you heard it, audio is working)"
+else
+    echo "   speaker-test not available"
+fi
+echo
+
+echo "=== Test Complete ==="
+echo "If audio is not working, run: ~/bin/fix-audio.sh"
+EOF
+
+chmod +x ~/bin/restart-crd.sh ~/bin/check-crd.sh ~/bin/fix-audio.sh ~/bin/test-audio.sh
 
 # Add ~/bin to PATH if not already there
 if ! echo $PATH | grep -q "$HOME/bin"; then
@@ -447,7 +685,7 @@ Audio Configuration:
 - Audio should work automatically when connected
 
 Troubleshooting:
-- If audio doesn't work, try: pulseaudio --kill && pulseaudio --start
+- If audio doesn't work, run: pulseaudio --kill && pulseaudio --start
 - Check service status with: ~/bin/check-crd.sh
 - Restart service with: ~/bin/restart-crd.sh
 
@@ -469,7 +707,7 @@ log "Performing final system configuration..."
 sudo systemctl enable chrome-remote-desktop@$USER.service
 
 # Set up audio group permissions
-sudo usermod -aG audio $USER
+sudo usermod -a -G audio $USER
 
 # Create a simple wallpaper directory
 mkdir -p ~/Pictures/Wallpapers

@@ -111,7 +111,7 @@ For advanced audio configuration and troubleshooting:
 
 ```bash
 # Download the audio configuration script
-wget https://raw.githubusercontent.com/arifbdarsono/crd-openbox-setup/main/configure_audio_crd.sh
+wget https://raw.githubusercontent.com/arifbdarsono/crd-openbox-auto-setup-script/main/configure_audio_crd.sh
 
 # Make it executable
 chmod +x configure_audio_crd.sh
@@ -258,6 +258,9 @@ For Chrome Remote Desktop issues:
 - [Chrome Remote Desktop Community](https://support.google.com/chrome/community)
 
 ## Changelog
+
+### v1.0.1 (2025-07-07)
+- [Fix] Audio streaming fail to start when reboot or logout
 
 ### v1.0.0 (2025-07-07)
 - Initial release

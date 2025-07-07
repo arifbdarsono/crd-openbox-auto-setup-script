@@ -211,4 +211,4 @@ done
 
 echo
 info "If you're still missing packages, try running the main installation script again."
-info "The script will handle missing packages more gracefully."
+info "The script will now handle missing packages more gracefully."
