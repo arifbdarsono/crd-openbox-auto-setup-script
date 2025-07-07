@@ -111,7 +111,7 @@ For advanced audio configuration and troubleshooting:
 
 ```bash
 # Download the audio configuration script
-wget https://raw.githubusercontent.com/arifbdarsono/crd-openbox-setup/main/configure_audio_crd.sh
+wget https://raw.githubusercontent.com/arifbdarsono/crd-openbox-auto-setup-script/main/configure_audio_crd.sh
 
 # Make it executable
 chmod +x configure_audio_crd.sh
