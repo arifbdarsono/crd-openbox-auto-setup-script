@@ -259,5 +259,8 @@ For Chrome Remote Desktop issues:
 
 ## Changelog
 
+### v1.0.1 (2025-07-07)
+- [Fix] Audio streaming fail to start when reboot or logout
+
 ### v1.0.0 (2025-07-07)
 - Initial release
